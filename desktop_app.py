@@ -1,53 +1,143 @@
 # desktop_app.py
+import atexit
+import json
+import os
+import subprocess
+import sys
+import time
 import tkinter as tk
 from tkinter import font, messagebox
+from urllib.parse import urlparse
+
 import requests
-import json
-import threading
-import time
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- Configuration ---
-# Backend server address
-# Please replace '127.0.0.1' with your computer's local network IP address, e.g., '192.168.101.6'
-API_BASE_URL = "http://192.168.101.6:5000" # <-- **Please confirm this is your actual local IP**
+# Backend server address, resolved in this order:
+#   1. TODO_API_URL environment variable
+#   2. "api_url" in config.json next to this script
+#   3. http://127.0.0.1:5000 (same machine, zero setup)
+def load_api_base_url():
+    url = os.environ.get("TODO_API_URL")
+    if not url:
+        try:
+            with open(os.path.join(APP_DIR, "config.json"), "r", encoding="utf-8") as f:
+                url = json.load(f).get("api_url")
+        except (OSError, ValueError):
+            url = None
+    return (url or "http://127.0.0.1:5000").rstrip("/")
+
+API_BASE_URL = load_api_base_url()
+
+# Seconds to wait for the backend before giving up on a request
+REQUEST_TIMEOUT = 5
+
+# Milliseconds between automatic background refreshes of the todo list
+SYNC_INTERVAL_MS = 60_000
+
+# --- Local backend auto-start ---
+# When the API points at this machine, the app launches server.py itself,
+# so double-clicking start.bat (or running this file) is all that's needed.
+_server_process = None
+
+def _stop_local_server():
+    if _server_process is not None and _server_process.poll() is None:
+        _server_process.terminate()
+
+def _backend_reachable():
+    try:
+        requests.get(f"{API_BASE_URL}/todos", timeout=1)
+        return True
+    except requests.exceptions.RequestException:
+        return False
+
+def ensure_local_server():
+    """Start server.py in the background if the local backend isn't up yet."""
+    global _server_process
+    if _backend_reachable():
+        return True
+
+    parsed = urlparse(API_BASE_URL)
+    if parsed.hostname not in ("127.0.0.1", "localhost"):
+        return False  # Remote backend: nothing we can start from here
+
+    server_path = os.path.join(APP_DIR, "server.py")
+    if not os.path.exists(server_path):
+        return False
+
+    creationflags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    env = {**os.environ, "TODO_PORT": str(parsed.port or 5000)}
+    _server_process = subprocess.Popen(
+        [sys.executable, server_path], creationflags=creationflags, env=env
+    )
+    atexit.register(_stop_local_server)
+
+    # Give the server a few seconds to boot before the UI starts polling
+    for _ in range(20):
+        time.sleep(0.25)
+        if _backend_reachable():
+            return True
+    return False
 
 # --- Tkinter Application Class ---
 class TodoApp:
     def __init__(self, master):
-        print("TodoApp __init__ called.") # Debug print
         self.master = master
         master.title("Minimal Todo")
 
         # --- Window attribute settings for floating effect with rounded corners ---
-        # A specific color that will be made transparent to create rounded corners
-        self.transparent_color = "#000001" 
-        master.attributes("-transparentcolor", self.transparent_color)
+        # A specific color that will be made transparent to create rounded corners.
+        # "-transparentcolor" only exists on Windows; elsewhere fall back to an
+        # opaque white background (square corners instead of a crash).
+        self.transparent_color = "#000001"
+        try:
+            master.attributes("-transparentcolor", self.transparent_color)
+        except tk.TclError:
+            self.transparent_color = "#FFFFFF"
         master.overrideredirect(True)  # Remove window border and title bar
         master.attributes("-topmost", True)  # Keep window on top
-        master.attributes("-alpha", 0.95) # Slightly less transparent for white background
+        try:
+            master.attributes("-alpha", 0.95) # Slightly less transparent for white background
+        except tk.TclError:
+            pass  # Alpha compositing unavailable on some window managers
         master.geometry("300x50+100+100") # Initial size (width x height) and position (x+y)
 
         self.is_expanded = False # Flag for expanded state
         self.initial_height = 50 # Height when collapsed
         self.expanded_height = 300 # Height when expanded
 
-        # Define font styles for simplicity and aesthetics
-        self.font_main = font.Font(family="Inter", size=14, weight="bold")
-        self.font_todo = font.Font(family="Inter", size=12)
+        # Pick the nicest installed UI font instead of assuming "Inter" exists
+        available_fonts = set(font.families())
+        ui_font_family = next(
+            (f for f in ("Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
+                         "Helvetica Neue", "Helvetica")
+             if f in available_fonts),
+            "TkDefaultFont",
+        )
+        self.font_main = font.Font(family=ui_font_family, size=14, weight="bold")
+        self.font_todo = font.Font(family=ui_font_family, size=12)
+        self.font_todo_done = font.Font(family=ui_font_family, size=12, overstrike=1)
+        self.font_small = font.Font(family=ui_font_family, size=10)
 
         # --- Colors for the new aesthetic ---
-        self.bg_color_light = "#FFFFFF" # White background
-        self.bg_color_medium = "#F0F0F0" # Light gray for list background
-        self.bg_color_dark = "#E0E0E0" # Even lighter gray for input
-        self.text_color_dark = "#000000" # Black text
-        self.text_color_gray = "#666666" # Gray text for completed/no todos
-        self.button_bg_color = "#D0D0D0" # Light gray for buttons
-        self.button_active_bg_color = "#C0C0C0" # Slightly darker gray for active button
+        self.bg_color_light = "#FFFFFF"        # Card / collapsed bar background
+        self.bg_color_medium = "#F6F6F8"       # List background
+        self.bg_color_dark = "#EFEFF3"         # Input background
+        self.text_color_dark = "#1C1C1E"       # Primary text
+        self.text_color_gray = "#9B9BA3"       # Secondary / completed text
+        self.accent_color = "#5B8DEF"          # Accent (Add button, insertion line)
+        self.accent_active_color = "#3E6FD9"   # Accent pressed state
+        self.active_dot_color = "#34C759"      # Green dot next to the active task
+        self.delete_idle_color = "#C7C7CC"     # Delete cross at rest
+        self.delete_hover_color = "#FF5252"    # Delete cross on hover
+        self.button_bg_color = "#E4E4EA"       # Neutral controls / scrollbar
+        self.button_active_bg_color = "#D6D6DE"
 
-        self.original_bg_color = self.bg_color_light # Original background color of todo items
-        self.highlight_bg_color = "#E0E0E0" # Highlight color for drop target (lighter gray)
-        self.dragged_item_highlight_color = "#A0A0A0" # Color for the original item being dragged (medium gray)
-        self.insertion_indicator_color = "#007BFF" # Blue for insertion line
+        self.original_bg_color = self.bg_color_light   # Todo row background
+        self.highlight_bg_color = "#E8EEFC"            # Drop-target highlight (soft blue)
+        self.dragged_item_highlight_color = "#A9BFF5"  # Border of the row being dragged
+        self.insertion_indicator_color = self.accent_color
 
         # --- Main Canvas for Rounded Corners ---
         self.bg_canvas = tk.Canvas(master, bg=self.transparent_color, highlightthickness=0)
@@ -68,7 +158,7 @@ class TodoApp:
         self.active_todo_display_frame = tk.Frame(self.main_frame, bg=self.bg_color_light)
         self.active_todo_display_frame.pack(pady=10)
 
-        self.circle_label = tk.Label(self.active_todo_display_frame, text="●", fg="#4CAF50", bg=self.bg_color_light, font=("Inter", 10)) # Green circle
+        self.circle_label = tk.Label(self.active_todo_display_frame, text="●", fg=self.active_dot_color, bg=self.bg_color_light, font=self.font_small)
         self.circle_label.pack(side="left", padx=(0, 5))
         
         self.label_current_todo = tk.Label(self.active_todo_display_frame, text="Loading todos...", fg=self.text_color_dark, bg=self.bg_color_light,
@@ -81,6 +171,15 @@ class TodoApp:
         self.master.bind("<B1-Motion>", self.on_window_mouse_drag)
         self.master.bind("<ButtonRelease-1>", self.on_window_button_release)
 
+        # Right-click anywhere for the app menu (the borderless window has no
+        # title bar, so this is the way to quit without killing the process)
+        self.app_menu = tk.Menu(master, tearoff=0)
+        self.app_menu.add_command(label="Refresh now", command=self.load_todos)
+        self.app_menu.add_separator()
+        self.app_menu.add_command(label="Quit Minimal Todo", command=self.quit_app)
+        self.master.bind_all("<Button-3>", self.show_app_menu)
+        self.master.bind_all("<Button-2>", self.show_app_menu)  # macOS middle/right variants
+
         # --- Expanded todo list section - placed inside bg_canvas ---
         self.todo_list_frame = tk.Frame(self.bg_canvas, bg=self.bg_color_medium)
         self.todo_list_frame_window = self.bg_canvas.create_window(
@@ -90,16 +189,19 @@ class TodoApp:
 
         # Input field and Add button
         self.input_frame = tk.Frame(self.todo_list_frame, bg=self.bg_color_medium)
-        self.input_frame.pack(fill="x", pady=5, padx=5)
+        self.input_frame.pack(fill="x", pady=(10, 6), padx=10)
 
-        self.todo_input = tk.Entry(self.input_frame, bg=self.bg_color_dark, fg=self.text_color_dark, insertbackground=self.text_color_dark,
-                                   font=self.font_todo, relief="flat", bd=2, highlightbackground=self.button_bg_color, highlightthickness=1)
-        self.todo_input.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.todo_input = tk.Entry(self.input_frame, bg=self.bg_color_dark, fg=self.text_color_dark,
+                                   insertbackground=self.text_color_dark, font=self.font_todo,
+                                   relief="flat", bd=0, highlightbackground=self.button_bg_color,
+                                   highlightcolor=self.accent_color, highlightthickness=1)
+        self.todo_input.pack(side="left", fill="x", expand=True, padx=(0, 6), ipady=5)
         self.todo_input.bind("<Return>", self.add_todo_event)
 
         self.add_button = tk.Button(self.input_frame, text="Add", command=self.add_todo,
-                                         bg=self.button_bg_color, fg=self.text_color_dark, relief="flat", font=self.font_todo,
-                                         activebackground=self.button_active_bg_color, activeforeground=self.text_color_dark, bd=0, padx=8, pady=4)
+                                    bg=self.accent_color, fg="white", relief="flat", font=self.font_todo,
+                                    activebackground=self.accent_active_color, activeforeground="white",
+                                    bd=0, padx=12, pady=5, cursor="hand2")
         self.add_button.pack(side="right")
 
         # Todo list display area (using Canvas and Scrollbar for scrollable list)
@@ -141,7 +243,6 @@ class TodoApp:
         self._is_dragging_window = False # Flag for window dragging
         self._is_dragging_todo_item = False # Flag to indicate if a todo item is being dragged
         self._click_threshold = 5 # Pixel threshold to distinguish click from drag (for window and todo items)
-        print(f"_click_threshold initialized in __init__: {self._click_threshold}") # Debug print
 
         # Bind resize event to redraw rounded rectangle
         self.master.bind("<Configure>", self.on_window_configure)
@@ -190,7 +291,6 @@ class TodoApp:
         self._offset_x = event.x
         self._offset_y = event.y
         self._is_dragging_window = False
-        print(f"on_window_button_press: _offset_x={self._offset_x}, _offset_y={self._offset_y}") # Debug print
 
     def on_window_mouse_drag(self, event):
         if self._offset_x is not None and self._offset_y is not None:
@@ -207,7 +307,6 @@ class TodoApp:
                 self._is_dragging_window = True
                 # Move window to new position: current mouse screen position - initial offset within window
                 self.master.geometry(f"+{event.x_root - self._offset_x}+{event.y_root - self._offset_y}")
-                print(f"Window dragged to: +{event.x_root - self._offset_x}+{event.y_root - self._offset_y}") # Debug print
 
     def _is_part_of_todo_item(self, widget):
         # Ensure widget is a Tkinter widget before trying to access attributes like master
@@ -242,7 +341,6 @@ class TodoApp:
             # then it's a click on the general window background.
             if not is_interactive_widget and not is_todo_item_part:
                 self.toggle_expand()
-                print("Window toggle_expand triggered.") # Debug print
         self._offset_x = None
         self._offset_y = None
         self._is_dragging_window = False
@@ -255,7 +353,6 @@ class TodoApp:
             self.bg_canvas.itemconfigure(self.todo_list_frame_window, state='hidden')
             self.bg_canvas.itemconfigure(self.main_frame_window, state='normal')
             # self.main_frame.pack(fill="both", expand=True) # No need to pack, handled by create_window
-            print("Window collapsed.") # Debug print
         else:
             # Expand window
             self.master.geometry(f"300x{self.expanded_height}+{self.master.winfo_x()}+{self.master.winfo_y()}")
@@ -263,19 +360,17 @@ class TodoApp:
             self.bg_canvas.itemconfigure(self.todo_list_frame_window, state='normal')
             # self.todo_list_frame.pack(fill="both", expand=True) # No need to pack, handled by create_window
             self.load_todos() # Refresh todo list on expand to ensure latest data
-            print("Window expanded.") # Debug print
         self.is_expanded = not self.is_expanded
         self.on_window_configure(None) # Redraw rounded corners for new size
 
     # --- Load Todo Items ---
     def load_todos(self):
         try:
-            response = requests.get(f"{API_BASE_URL}/todos")
+            response = requests.get(f"{API_BASE_URL}/todos", timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             todos = response.json()
             self.current_todos_data = todos # Update the internal list of todo data
             self.update_todo_display(todos)
-            print("Todos loaded successfully.") # Debug print
         except requests.exceptions.ConnectionError:
             self.label_current_todo.config(text="Cannot connect to server", fg="red")
             self.circle_label.pack_forget() # Hide circle if no connection
@@ -302,16 +397,15 @@ class TodoApp:
         if incomplete_todos:
             self.label_current_todo.config(text=incomplete_todos[0]['content'], fg=self.text_color_dark)
             self.circle_label.pack(side="left", padx=(0, 5)) # Show circle next to active todo
-            print(f"Active todo set: {incomplete_todos[0]['content']}") # Debug print
         else:
             self.label_current_todo.config(text="No todos yet", fg=self.text_color_gray)
             self.circle_label.pack_forget() # Hide circle if no todos
-            print("No active todo.") # Debug print
 
         # Display all todos in the expanded list
         for todo in todos:
-            frame = tk.Frame(self.scrollable_frame, bg=self.original_bg_color, bd=1, relief="solid", highlightbackground=self.highlight_bg_color, highlightthickness=1)
-            frame.pack(fill="x", pady=2, padx=5)
+            frame = tk.Frame(self.scrollable_frame, bg=self.original_bg_color, bd=0, relief="flat",
+                             highlightbackground=self.highlight_bg_color, highlightthickness=0)
+            frame.pack(fill="x", pady=3, padx=6, ipady=4)
 
             # Store todo data directly on the frame for drag-and-drop
             frame.todo_data = todo
@@ -328,7 +422,7 @@ class TodoApp:
                                       command=lambda t=todo, v=check_var: self.toggle_complete(t, v),
                                       bg=self.original_bg_color, fg=self.text_color_dark, selectcolor=self.button_bg_color,
                                       activebackground=self.original_bg_color, bd=0, relief="flat")
-            checkbox.pack(side="left", padx=(0, 5))
+            checkbox.pack(side="left", padx=(6, 5))
 
             label = tk.Label(frame, text=todo['content'], bg=self.original_bg_color, fg=self.text_color_dark, font=self.font_todo, anchor="w", wraplength=220) # Added wraplength
             label.pack(side="left", fill="x", expand=True)
@@ -341,12 +435,18 @@ class TodoApp:
 
 
             if todo['is_completed']:
-                label.config(fg=self.text_color_gray)
+                label.config(fg=self.text_color_gray, font=self.font_todo_done)
 
-            delete_button = tk.Button(frame, text="X", command=lambda t=todo: self.delete_todo(t),
-                                       bg="#FF6666", fg="white", relief="flat", font=("Inter", 10, "bold"), # Red delete button
-                                       activebackground="#FF3333", activeforeground="white", bd=0, padx=6, pady=2)
-            delete_button.pack(side="right")
+            # Quiet gray cross that turns red on hover — less visually noisy
+            # than a permanently red button on every row
+            delete_button = tk.Button(frame, text="✕", command=lambda t=todo: self.delete_todo(t),
+                                      bg=self.original_bg_color, fg=self.delete_idle_color, relief="flat",
+                                      font=self.font_small, activebackground=self.original_bg_color,
+                                      activeforeground=self.delete_hover_color, bd=0, padx=8, pady=2,
+                                      cursor="hand2")
+            delete_button.pack(side="right", padx=(0, 4))
+            delete_button.bind("<Enter>", lambda e, b=delete_button: b.config(fg=self.delete_hover_color))
+            delete_button.bind("<Leave>", lambda e, b=delete_button: b.config(fg=self.delete_idle_color))
 
             # Store the frame and its associated todo data
             self.todo_frames.append(frame)
@@ -362,11 +462,10 @@ class TodoApp:
         content = self.todo_input.get().strip()
         if content:
             try:
-                response = requests.post(f"{API_BASE_URL}/todos", json={'content': content})
+                response = requests.post(f"{API_BASE_URL}/todos", json={'content': content}, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 self.todo_input.delete(0, tk.END)
                 self.load_todos()
-                print(f"Todo added: {content}") # Debug print
             except requests.exceptions.ConnectionError:
                 messagebox.showerror("Error", "Cannot connect to server, please check network or server status.")
             except requests.exceptions.HTTPError as e:
@@ -380,10 +479,9 @@ class TodoApp:
     def toggle_complete(self, todo, var):
         is_completed = var.get()
         try:
-            response = requests.put(f"{API_BASE_URL}/todos/{todo['id']}", json={'is_completed': is_completed})
+            response = requests.put(f"{API_BASE_URL}/todos/{todo['id']}", json={'is_completed': is_completed}, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             self.load_todos()
-            print(f"Todo {todo['id']} completion status toggled to {is_completed}") # Debug print
         except requests.exceptions.ConnectionError:
             messagebox.showerror("Error", "Cannot connect to server, please check network or server status.")
             var.set(not is_completed)
@@ -398,10 +496,9 @@ class TodoApp:
     def delete_todo(self, todo):
         if messagebox.askyesno("Delete Confirmation", f"Are you sure you want to delete todo: '{todo['content']}'?"):
             try:
-                response = requests.delete(f"{API_BASE_URL}/todos/{todo['id']}")
+                response = requests.delete(f"{API_BASE_URL}/todos/{todo['id']}", timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 self.load_todos()
-                print(f"Todo {todo['id']} deleted.") # Debug print
             except requests.exceptions.ConnectionError:
                 messagebox.showerror("Error", "Cannot connect to server, please check network or server status.")
             except requests.exceptions.HTTPError as e:
@@ -446,7 +543,6 @@ class TodoApp:
             # event.x and event.y are relative to the widget that received the event
             # event.x_root and event.y_root are absolute screen coordinates
             self.drag_toplevel.geometry(f"+{event.x_root - event.x}+{event.y_root - event.y}")
-            print(f"Toplevel created at: +{event.x_root - event.x}+{event.y_root - event.y}") # Debug print
 
             # The insertion_indicator_line_id is already created in __init__
             self.todo_canvas.itemconfigure(self.insertion_indicator_line_id, state='hidden') # Ensure it's hidden before drag starts
@@ -478,7 +574,7 @@ class TodoApp:
                 if frame != self.dragged_item_frame: # Don't reset the original dragged item's highlight (it's hidden anyway)
                     frame.config(bg=self.original_bg_color)
                     for child in frame.winfo_children():
-                        if isinstance(child, (tk.Label, tk.Checkbutton)):
+                        if isinstance(child, (tk.Label, tk.Checkbutton, tk.Button)):
                             child.config(bg=self.original_bg_color)
             # Hide insertion indicator line initially for this drag event
             self.todo_canvas.itemconfigure(self.insertion_indicator_line_id, state='hidden')
@@ -506,17 +602,19 @@ class TodoApp:
                 self.circle_label.config(bg=self.highlight_bg_color)
             else:
                 # Check if hovering over another todo item for reordering within the list
+                # target_widget is None when the pointer is outside any of our
+                # windows (e.g. dragged off-screen), so guard before .master
                 current_target_frame = None
                 if hasattr(target_widget, 'todo_data'):
                     current_target_frame = target_widget
-                elif hasattr(target_widget.master, 'todo_data'):
+                elif target_widget is not None and hasattr(target_widget.master, 'todo_data'):
                     current_target_frame = target_widget.master
                 
                 if current_target_frame and current_target_frame != self.dragged_item_frame:
                     # Highlight the target frame
                     current_target_frame.config(bg=self.highlight_bg_color)
                     for child in current_target_frame.winfo_children():
-                        if isinstance(child, (tk.Label, tk.Checkbutton)):
+                        if isinstance(child, (tk.Label, tk.Checkbutton, tk.Button)):
                             child.config(bg=self.highlight_bg_color)
                     
                     # Position insertion indicator line
@@ -559,14 +657,13 @@ class TodoApp:
         if self.drag_toplevel:
             self.drag_toplevel.destroy()
             self.drag_toplevel = None
-            print("Toplevel destroyed.") # Debug print
 
         # Hide insertion indicator
         self.todo_canvas.itemconfigure(self.insertion_indicator_line_id, state='hidden')
 
-        # Reset original dragged item highlight
+        # Reset original dragged item highlight (rows have no border at rest)
         if self.dragged_item_frame:
-            self.dragged_item_frame.config(highlightbackground=self.highlight_bg_color, highlightthickness=1) # Reset to original highlight
+            self.dragged_item_frame.config(highlightbackground=self.highlight_bg_color, highlightthickness=0)
 
 
         if self.dragged_item_data:
@@ -584,14 +681,11 @@ class TodoApp:
                                         self.bg_canvas.find_withtag("current")[0] == self.main_frame_window))
 
 
-            if is_dropped_on_active_zone:
-                print("Dropped on active zone.") # Debug print
-            else:
+            if not is_dropped_on_active_zone:
                 if hasattr(target_widget, 'todo_data'):
                     target_todo_data = target_widget.todo_data
-                elif hasattr(target_widget.master, 'todo_data'):
+                elif target_widget is not None and hasattr(target_widget.master, 'todo_data'):
                     target_todo_data = target_widget.master.todo_data
-                print(f"Dropped on target todo: {target_todo_data['content'] if target_todo_data else 'None'}") # Debug print
 
             # Reset highlight for all potential targets (including main_frame)
             self.main_frame.config(bg=self.bg_color_light) # Ensure main frame highlight is off
@@ -601,7 +695,7 @@ class TodoApp:
             for frame in self.todo_frames:
                 frame.config(bg=self.original_bg_color)
                 for child in frame.winfo_children():
-                    if isinstance(child, (tk.Label, tk.Checkbutton)):
+                    if isinstance(child, (tk.Label, tk.Checkbutton, tk.Button)):
                         child.config(bg=self.original_bg_color)
 
 
@@ -654,7 +748,6 @@ class TodoApp:
 
             # Update the backend with the new order
             ordered_ids = [todo['id'] for todo in new_ordered_todos]
-            print(f"Sending reorder request with ordered_ids: {ordered_ids}") # Debug print
             self.reorder_todos_backend(ordered_ids)
             
             self._reset_drag_state() # Reset drag flags and variables
@@ -680,7 +773,7 @@ class TodoApp:
             if target_frame and target_frame != self.dragged_item_frame:
                 target_frame.config(bg=self.highlight_bg_color)
                 for child in target_frame.winfo_children():
-                    if isinstance(child, (tk.Label, tk.Checkbutton)):
+                    if isinstance(child, (tk.Label, tk.Checkbutton, tk.Button)):
                         child.config(bg=self.highlight_bg_color)
 
     def on_todo_item_leave(self, event):
@@ -695,13 +788,13 @@ class TodoApp:
             if target_frame and target_frame.cget('bg') == self.highlight_bg_color:
                 target_frame.config(bg=self.original_bg_color)
                 for child in target_frame.winfo_children():
-                    if isinstance(child, (tk.Label, tk.Checkbutton)):
+                    if isinstance(child, (tk.Label, tk.Checkbutton, tk.Button)):
                         child.config(bg=self.original_bg_color)
 
     # --- Backend Reorder Call ---
     def reorder_todos_backend(self, ordered_ids):
         try:
-            response = requests.put(f"{API_BASE_URL}/todos/reorder", json={'ordered_ids': ordered_ids})
+            response = requests.put(f"{API_BASE_URL}/todos/reorder", json={'ordered_ids': ordered_ids}, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             self.load_todos() # Reload to ensure UI matches backend
         except requests.exceptions.ConnectionError:
@@ -712,15 +805,28 @@ class TodoApp:
             messagebox.showerror("Error", "Unknown error reordering todos: " + str(e)) # Convert error to string
 
     # --- Schedule Data Sync ---
+    # Tkinter widgets must only be touched from the main thread, so the
+    # periodic refresh uses master.after instead of threading.Timer.
     def schedule_sync(self):
-        threading.Timer(60.0, self.sync_data).start()
+        self.master.after(SYNC_INTERVAL_MS, self.sync_data)
 
     def sync_data(self):
         self.load_todos()
         self.schedule_sync()
 
+    # --- App Menu ---
+    def show_app_menu(self, event):
+        try:
+            self.app_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.app_menu.grab_release()
+
+    def quit_app(self):
+        self.master.destroy()
+
 # --- Application Entry Point ---
 if __name__ == '__main__':
+    ensure_local_server()
     root = tk.Tk()
     app = TodoApp(root)
     root.mainloop()

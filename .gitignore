@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local data — every machine keeps its own todo database
+todos.db
+instance/
+
+# Per-machine configuration (copy from config.example.json)
+config.json
