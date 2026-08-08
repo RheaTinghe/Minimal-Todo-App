@@ -117,29 +117,30 @@ class TodoApp:
              if f in available_fonts),
             "TkDefaultFont",
         )
-        self.font_main = font.Font(family=ui_font_family, size=14, weight="bold")
-        self.font_todo = font.Font(family=ui_font_family, size=12)
-        self.font_todo_done = font.Font(family=ui_font_family, size=12, overstrike=1)
-        self.font_small = font.Font(family=ui_font_family, size=10)
+        # Slightly larger sizes for crisper, more readable text
+        self.font_main = font.Font(family=ui_font_family, size=15, weight="bold")
+        self.font_todo = font.Font(family=ui_font_family, size=13)
+        self.font_todo_done = font.Font(family=ui_font_family, size=13, overstrike=1)
+        self.font_small = font.Font(family=ui_font_family, size=11)
 
-        # --- Colors for the new aesthetic ---
+        # --- Colors: silver + white minimal aesthetic ---
         self.bg_color_light = "#FFFFFF"        # Card / collapsed bar background
-        self.bg_color_medium = "#F6F6F8"       # List background
-        self.bg_color_dark = "#EFEFF3"         # Input background
-        self.text_color_dark = "#1C1C1E"       # Primary text
-        self.text_color_gray = "#9B9BA3"       # Secondary / completed text
-        self.accent_color = "#D77A8C"          # Soft rose accent (Add button, insertion line)
-        self.accent_active_color = "#C25E72"   # Accent pressed state
-        self.active_dot_color = "#D77A8C"      # Dot next to the active task
-        self.delete_idle_color = "#C7C7CC"     # Delete cross at rest
-        self.delete_hover_color = "#FF5252"    # Delete cross on hover
-        self.button_bg_color = "#E4E4EA"       # Neutral controls / scrollbar
-        self.button_active_bg_color = "#D6D6DE"
+        self.bg_color_medium = "#F4F5F7"       # List background (cool light gray)
+        self.bg_color_dark = "#ECEDF0"         # Input background
+        self.text_color_dark = "#2B2D33"       # Primary text (soft charcoal)
+        self.text_color_gray = "#A6A9B3"       # Secondary / completed text
+        self.accent_color = "#D3D6DD"          # Silver accent (Add button)
+        self.accent_active_color = "#C3C7D0"   # Accent pressed state
+        self.active_dot_color = "#8E939E"      # Dot next to the active task
+        self.delete_idle_color = "#C9CCD4"     # Delete cross at rest
+        self.delete_hover_color = "#E07A7A"    # Delete cross on hover (muted red)
+        self.button_bg_color = "#E3E5EA"       # Neutral controls / scrollbar
+        self.button_active_bg_color = "#D6D8DF"
 
         self.original_bg_color = self.bg_color_light   # Todo row background
-        self.highlight_bg_color = "#FAEDF0"            # Drop-target highlight (blush pink)
-        self.dragged_item_highlight_color = "#EDC3CD"  # Border of the row being dragged
-        self.insertion_indicator_color = self.accent_color
+        self.highlight_bg_color = "#EDEFF3"            # Drop-target highlight (light silver)
+        self.dragged_item_highlight_color = "#C4C9D2"  # Border of the row being dragged
+        self.insertion_indicator_color = "#9BA1AD"     # Silver insertion line
 
         # --- Main Canvas for Rounded Corners ---
         self.bg_canvas = tk.Canvas(master, bg=self.transparent_color, highlightthickness=0)
@@ -200,9 +201,11 @@ class TodoApp:
         self.todo_input.pack(side="left", fill="x", expand=True, padx=(0, 6), ipady=5)
         self.todo_input.bind("<Return>", self.add_todo_event)
 
+        # Silver button reads better with dark text than with white
         self.add_button = tk.Button(self.input_frame, text="Add", command=self.add_todo,
-                                    bg=self.accent_color, fg="white", relief="flat", font=self.font_todo,
-                                    activebackground=self.accent_active_color, activeforeground="white",
+                                    bg=self.accent_color, fg=self.text_color_dark, relief="flat",
+                                    font=self.font_todo, activebackground=self.accent_active_color,
+                                    activeforeground=self.text_color_dark,
                                     bd=0, padx=12, pady=5, cursor="hand2")
         self.add_button.pack(side="right")
 
