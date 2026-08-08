@@ -24,7 +24,7 @@ It was specifically designed to support users with ADHD and other attention frag
 
 ## 🏗️ Architecture
 
-- **Frontend**: Python Tkinter (`desktop_app.py`)
+- **Frontend**: Python + CustomTkinter (`desktop_app.py`) — modern rounded widgets on top of Tkinter
 - **Backend**: Flask + SQLite REST API (`server.py`), launched automatically by the frontend when needed
 
 ## 🚀 Quick Start
