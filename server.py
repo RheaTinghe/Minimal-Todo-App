@@ -80,9 +80,9 @@ def add_todo():
     if err:
         return jsonify({"error": err}), 400
 
-    # Get the maximum current position and add 1 for the new todo
-    max_position = db.session.query(db.func.max(Todo.position)).scalar()
-    new_position = (max_position if max_position is not None else -1) + 1
+    # New todos go to the top of the list (and become the active task)
+    min_position = db.session.query(db.func.min(Todo.position)).scalar()
+    new_position = (min_position if min_position is not None else 1) - 1
 
     new_todo = Todo(
         content=content,
