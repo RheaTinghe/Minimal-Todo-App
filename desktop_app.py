@@ -107,11 +107,13 @@ class TodoApp:
         self.initial_height = 50 # Height when collapsed
         self.expanded_height = 300 # Height when expanded
 
-        # Pick the nicest installed UI font instead of assuming "Inter" exists
+        # Pick the nicest installed UI font. CJK-capable fonts come first:
+        # Latin-only fonts (Segoe UI, Inter) make Chinese text fall back to
+        # an ugly legacy font, so YaHei/PingFang win when available.
         available_fonts = set(font.families())
         ui_font_family = next(
-            (f for f in ("Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei UI",
-                         "Helvetica Neue", "Helvetica")
+            (f for f in ("PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+                         "Yu Gothic UI", "Segoe UI", "Helvetica Neue", "Helvetica")
              if f in available_fonts),
             "TkDefaultFont",
         )
@@ -126,17 +128,17 @@ class TodoApp:
         self.bg_color_dark = "#EFEFF3"         # Input background
         self.text_color_dark = "#1C1C1E"       # Primary text
         self.text_color_gray = "#9B9BA3"       # Secondary / completed text
-        self.accent_color = "#5B8DEF"          # Accent (Add button, insertion line)
-        self.accent_active_color = "#3E6FD9"   # Accent pressed state
-        self.active_dot_color = "#34C759"      # Green dot next to the active task
+        self.accent_color = "#D77A8C"          # Soft rose accent (Add button, insertion line)
+        self.accent_active_color = "#C25E72"   # Accent pressed state
+        self.active_dot_color = "#D77A8C"      # Dot next to the active task
         self.delete_idle_color = "#C7C7CC"     # Delete cross at rest
         self.delete_hover_color = "#FF5252"    # Delete cross on hover
         self.button_bg_color = "#E4E4EA"       # Neutral controls / scrollbar
         self.button_active_bg_color = "#D6D6DE"
 
         self.original_bg_color = self.bg_color_light   # Todo row background
-        self.highlight_bg_color = "#E8EEFC"            # Drop-target highlight (soft blue)
-        self.dragged_item_highlight_color = "#A9BFF5"  # Border of the row being dragged
+        self.highlight_bg_color = "#FAEDF0"            # Drop-target highlight (blush pink)
+        self.dragged_item_highlight_color = "#EDC3CD"  # Border of the row being dragged
         self.insertion_indicator_color = self.accent_color
 
         # --- Main Canvas for Rounded Corners ---
@@ -217,11 +219,22 @@ class TodoApp:
             )
         )
 
-        self.todo_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.todo_canvas_window = self.todo_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.todo_canvas.configure(yscrollcommand=self.scrollbar.set)
+        # Keep the rows as wide as the canvas so they stretch edge to edge
+        self.todo_canvas.bind(
+            "<Configure>",
+            lambda e: self.todo_canvas.itemconfigure(self.todo_canvas_window, width=e.width)
+        )
 
         self.todo_canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         self.scrollbar.pack(side="right", fill="y")
+
+        # Mouse-wheel scrolling — Tk doesn't wire the wheel to canvases by
+        # default. <MouseWheel> covers Windows/macOS, Button-4/5 covers Linux.
+        self.master.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.master.bind_all("<Button-4>", self._on_mousewheel)
+        self.master.bind_all("<Button-5>", self._on_mousewheel)
 
         # --- Drag and Drop for Todo Items ---
         self.dragged_item_data = None # Stores data of the item being dragged
@@ -813,6 +826,21 @@ class TodoApp:
     def sync_data(self):
         self.load_todos()
         self.schedule_sync()
+
+    # --- Mouse Wheel Scrolling ---
+    def _on_mousewheel(self, event):
+        if not self.is_expanded:
+            return
+        num = getattr(event, "num", 0)
+        if num == 4:
+            delta = -1  # Linux scroll up
+        elif num == 5:
+            delta = 1   # Linux scroll down
+        elif event.delta:
+            delta = -1 if event.delta > 0 else 1
+        else:
+            return
+        self.todo_canvas.yview_scroll(delta, "units")
 
     # --- App Menu ---
     def show_app_menu(self, event):
