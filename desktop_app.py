@@ -400,6 +400,14 @@ class TodoApp:
             self.circle_label.pack_forget() # Hide circle if load failed
             print(f"Error loading todos: {e}")
 
+    def _ellipsize(self, text, font_obj, max_width):
+        """Trim text to max_width pixels, appending an ellipsis if trimmed."""
+        if font_obj.measure(text) <= max_width:
+            return text
+        while text and font_obj.measure(text + "…") > max_width:
+            text = text[:-1]
+        return text + "…"
+
     # --- Update Todo Item Display ---
     def update_todo_display(self, todos):
         # Clear old todo display
@@ -411,7 +419,10 @@ class TodoApp:
         incomplete_todos = [todo for todo in todos if not todo['is_completed']]
 
         if incomplete_todos:
-            self.label_current_todo.config(text=incomplete_todos[0]['content'], fg=self.text_color_dark)
+            # The collapsed bar is 300px wide and clips overflowing text on
+            # both sides (the label is centered), so ellipsize to fit
+            active_text = self._ellipsize(incomplete_todos[0]['content'], self.font_main, 245)
+            self.label_current_todo.config(text=active_text, fg=self.text_color_dark)
             self.circle_label.pack(side="left", padx=(0, 5)) # Show circle next to active todo
         else:
             self.label_current_todo.config(text="No todos yet", fg=self.text_color_gray)
