@@ -1,5 +1,6 @@
 # desktop_app.py
 import atexit
+import datetime
 import json
 import os
 import subprocess
@@ -139,6 +140,8 @@ class TodoApp:
         self.font_main = ctk.CTkFont(family=base_family, size=16, weight="bold")
         self.font_todo = ctk.CTkFont(family=base_family, size=14)
         self.font_todo_done = ctk.CTkFont(family=base_family, size=14, overstrike=True)
+        self.font_sub = ctk.CTkFont(family=base_family, size=13)
+        self.font_sub_done = ctk.CTkFont(family=base_family, size=13, overstrike=True)
         self.font_small = ctk.CTkFont(family=base_family, size=12)
 
         # --- Collapsed bar: a white rounded pill ---
@@ -179,6 +182,10 @@ class TodoApp:
                                                  scrollbar_button_hover_color=self.col_silver_press)
         self.list_frame.pack(fill="both", expand=True, padx=8, pady=(0, 10))
 
+        # Thin line that marks the insertion point while dragging a todo
+        self.drop_indicator = ctk.CTkFrame(self.list_frame, height=3, corner_radius=2,
+                                           fg_color=self.col_drag_border)
+
         # --- Window drag / click-to-toggle ---
         self.master.bind("<ButtonPress-1>", self.on_window_button_press)
         self.master.bind("<B1-Motion>", self.on_window_mouse_drag)
@@ -187,6 +194,7 @@ class TodoApp:
         # Right-click menu — the borderless window has no close button
         self.app_menu = tk.Menu(master, tearoff=0)
         self.app_menu.add_command(label="Refresh now", command=self.load_todos)
+        self.app_menu.add_command(label="Heatmap", command=self.show_heatmap)
         self.app_menu.add_separator()
         self.app_menu.add_command(label="Quit Minimal Todo", command=self.quit_app)
         self.master.bind_all("<Button-3>", self.show_app_menu)
@@ -194,6 +202,9 @@ class TodoApp:
 
         # --- State ---
         self.todo_frames = []
+        self.top_rows = []        # Top-level row frames in visual order
+        self.block_end = {}       # Top-level row -> last widget of its block
+        self._subtask_entry = None
         self.current_todos_data = []
         self.dragged_item_data = None
         self.dragged_item_frame = None
@@ -295,11 +306,21 @@ class TodoApp:
 
     # --- Render ---
     def update_todo_display(self, todos):
+        self._cancel_subtask_entry()
+        self.drop_indicator.pack_forget()
         for frame in self.todo_frames:
             frame.destroy()
         self.todo_frames.clear()
+        self.top_rows = []
+        self.block_end = {}
 
-        incomplete = [t for t in todos if not t["is_completed"]]
+        top_todos = [t for t in todos if not t.get("parent_id")]
+        children = {}
+        for t in todos:
+            if t.get("parent_id"):
+                children.setdefault(t["parent_id"], []).append(t)
+
+        incomplete = [t for t in top_todos if not t["is_completed"]]
         if incomplete:
             text = self._ellipsize(incomplete[0]["content"], self.font_main, 235)
             self.task_label.configure(text=text, text_color=self.col_text)
@@ -308,45 +329,124 @@ class TodoApp:
             self.task_label.configure(text="No todos yet", text_color=self.col_text_dim)
             self.dot_label.pack_forget()
 
-        for todo in todos:
+        for todo in top_todos:
+            row = self._build_row(todo, is_sub=False)
+            self.top_rows.append(row)
+            last_widget = row
+            for sub in children.get(todo["id"], []):
+                last_widget = self._build_row(sub, is_sub=True)
+            self.block_end[row] = last_widget
+
+    def _build_row(self, todo, is_sub):
+        done = todo["is_completed"]
+        if is_sub:
+            row = ctk.CTkFrame(self.list_frame, corner_radius=10, fg_color="transparent")
+            row.pack(fill="x", pady=0, padx=(30, 2))
+        else:
             row = ctk.CTkFrame(self.list_frame, corner_radius=14, fg_color=self.col_card,
                                border_width=1, border_color=self.col_border)
             row.pack(fill="x", pady=4, padx=2)
-            row.todo_data = todo
+        row.todo_data = todo
 
-            checkbox = ctk.CTkCheckBox(
-                row, text="", width=24, checkbox_width=20, checkbox_height=20,
-                corner_radius=10, border_width=2, border_color="#C9CCD4",
-                fg_color=self.col_dot, hover_color="#8A8F99", checkmark_color="white",
-            )
-            checkbox.configure(command=lambda t=todo, c=checkbox: self.toggle_complete(t, c))
-            if todo["is_completed"]:
-                checkbox.select()
-            checkbox.pack(side="left", padx=(10, 4), pady=8)
+        checkbox = ctk.CTkCheckBox(
+            row, text="", width=20 if is_sub else 24,
+            checkbox_width=16 if is_sub else 20, checkbox_height=16 if is_sub else 20,
+            corner_radius=8 if is_sub else 10, border_width=2, border_color="#C9CCD4",
+            fg_color=self.col_dot, hover_color="#8A8F99", checkmark_color="white",
+        )
+        checkbox.configure(command=lambda t=todo, c=checkbox: self.toggle_complete(t, c))
+        if done:
+            checkbox.select()
+        checkbox.pack(side="left", padx=(8 if is_sub else 10, 4), pady=4 if is_sub else 8)
 
-            label = ctk.CTkLabel(
-                row, text=todo["content"],
-                text_color=self.col_text_dim if todo["is_completed"] else self.col_text,
-                font=self.font_todo_done if todo["is_completed"] else self.font_todo,
-                anchor="w", justify="left", wraplength=185,
-            )
-            label.pack(side="left", fill="x", expand=True, pady=8)
+        if is_sub:
+            row_font = self.font_sub_done if done else self.font_sub
+        else:
+            row_font = self.font_todo_done if done else self.font_todo
+        label = ctk.CTkLabel(
+            row, text=todo["content"],
+            text_color=self.col_text_dim if done else self.col_text,
+            font=row_font, anchor="w", justify="left",
+            wraplength=150 if is_sub else 160,
+        )
+        label.pack(side="left", fill="x", expand=True, pady=4 if is_sub else 8)
 
-            delete_button = ctk.CTkButton(
-                row, text="✕", width=26, height=26, corner_radius=13,
-                fg_color="transparent", hover_color=self.col_del_hover,
+        delete_button = ctk.CTkButton(
+            row, text="✕", width=24, height=24, corner_radius=12,
+            fg_color="transparent", hover_color=self.col_del_hover,
+            text_color=self.col_text_dim, font=self.font_small,
+            command=lambda t=todo: self.delete_todo(t),
+        )
+        delete_button.pack(side="right", padx=(2, 6))
+
+        if not is_sub:
+            # Small ＋ to add a subtask under this task
+            sub_button = ctk.CTkButton(
+                row, text="＋", width=24, height=24, corner_radius=12,
+                fg_color="transparent", hover_color=self.col_silver,
                 text_color=self.col_text_dim, font=self.font_small,
-                command=lambda t=todo: self.delete_todo(t),
+                command=lambda t=todo: self.start_subtask_input(t),
             )
-            delete_button.pack(side="right", padx=(4, 8))
-
+            sub_button.pack(side="right", padx=0)
             # Drag bindings on the row and its label (text is most of the row)
             for widget in (row, label):
                 widget.bind("<ButtonPress-1>", self.on_todo_item_press)
                 widget.bind("<B1-Motion>", self.on_todo_item_drag)
                 widget.bind("<ButtonRelease-1>", self.on_todo_item_release)
+        else:
+            # Subtasks are not draggable; swallow presses so they neither
+            # drag the window nor toggle expand/collapse
+            for widget in (row, label):
+                widget.bind("<ButtonPress-1>", lambda e: "break")
+                widget.bind("<B1-Motion>", lambda e: "break")
+                widget.bind("<ButtonRelease-1>", lambda e: "break")
 
-            self.todo_frames.append(row)
+        self.todo_frames.append(row)
+        return row
+
+    # --- Inline Subtask Input ---
+    def start_subtask_input(self, parent_todo):
+        self._cancel_subtask_entry()
+        anchor = None
+        for row in self.top_rows:
+            if row.todo_data["id"] == parent_todo["id"]:
+                anchor = self.block_end.get(row, row)
+                break
+        if anchor is None:
+            return
+        entry = ctk.CTkEntry(self.list_frame, placeholder_text="Subtask…", height=30,
+                             corner_radius=15, fg_color=self.col_card,
+                             border_color=self.col_border, border_width=1,
+                             text_color=self.col_text, font=self.font_sub)
+        entry.pack(fill="x", padx=(30, 8), pady=2, after=anchor)
+        entry.bind("<Return>", lambda e, t=parent_todo: self._submit_subtask(t))
+        entry.bind("<Escape>", lambda e: self._cancel_subtask_entry())
+        entry.focus_set()
+        self._subtask_entry = entry
+
+    def _cancel_subtask_entry(self):
+        if self._subtask_entry is not None:
+            self._subtask_entry.destroy()
+            self._subtask_entry = None
+
+    def _submit_subtask(self, parent_todo):
+        if self._subtask_entry is None:
+            return
+        content = self._subtask_entry.get().strip()
+        if not content:
+            self._cancel_subtask_entry()
+            return
+        try:
+            response = requests.post(f"{API_BASE_URL}/todos",
+                                     json={"content": content, "parent_id": parent_todo["id"]},
+                                     timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            self._cancel_subtask_entry()
+            self.load_todos()
+        except requests.exceptions.ConnectionError:
+            messagebox.showerror("Error", "Cannot connect to server.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to add subtask: {e}")
 
     # --- Add ---
     def add_todo_event(self, event=None):
@@ -425,24 +525,38 @@ class TodoApp:
         self.drag_toplevel.geometry(f"+{event.x_root - event.x}+{event.y_root - event.y}")
         return "break"
 
-    def _reset_row_highlights(self):
-        for frame in self.todo_frames:
-            if frame is not self.dragged_item_frame:
-                frame.configure(fg_color=self.col_card,
-                                border_color=self.col_border, border_width=1)
+    def _movable_top_rows(self):
+        """Top-level rows excluding the one being dragged."""
+        return [r for r in self.top_rows if r is not self.dragged_item_frame]
+
+    def _drop_index(self, y_root):
+        """Insertion index among top-level rows for the given screen Y."""
+        index = 0
+        for row in self._movable_top_rows():
+            end_widget = self.block_end.get(row, row)
+            block_mid = (row.winfo_rooty() +
+                         end_widget.winfo_rooty() + end_widget.winfo_height()) / 2
+            if y_root > block_mid:
+                index += 1
+        return index
+
+    def _show_drop_indicator(self, y_root):
+        rows = self._movable_top_rows()
+        if not rows:
+            return
+        index = self._drop_index(y_root)
+        if index < len(rows):
+            self.drop_indicator.pack(fill="x", padx=14, pady=1, before=rows[index])
+        else:
+            last_end = self.block_end.get(rows[-1], rows[-1])
+            self.drop_indicator.pack(fill="x", padx=14, pady=1, after=last_end)
 
     def on_todo_item_drag(self, event):
         if not (self.dragged_item_frame and self.drag_toplevel):
             return
         self.drag_toplevel.geometry(
             f"+{event.x_root - self._drag_start_x}+{event.y_root - self._drag_start_y}")
-
-        self._reset_row_highlights()
-        target_widget = event.widget.winfo_containing(event.x_root, event.y_root)
-        target_row = self._todo_frame_of(target_widget) if target_widget else None
-        if target_row is not None and target_row is not self.dragged_item_frame:
-            target_row.configure(fg_color=self.col_highlight,
-                                 border_color=self.col_drag_border, border_width=2)
+        self._show_drop_indicator(event.y_root)
         return "break"
 
     def on_todo_item_release(self, event):
@@ -452,31 +566,20 @@ class TodoApp:
 
         if self.dragged_item_frame:
             self.dragged_item_frame.configure(border_color=self.col_border, border_width=1)
-        self._reset_row_highlights()
 
         if self.dragged_item_data:
-            target_widget = event.widget.winfo_containing(event.x_root, event.y_root)
-            target_row = self._todo_frame_of(target_widget) if target_widget else None
-            target_todo = target_row.todo_data if target_row is not None else None
+            # Reorder top-level todos only; subtasks stay under their parent
+            index = self._drop_index(event.y_root)
+            dragged_id = self.dragged_item_data["id"]
+            tops = [t for t in self.current_todos_data
+                    if not t.get("parent_id") and t["id"] != dragged_id]
+            tops.insert(index, self.dragged_item_data)
+            new_ids = [t["id"] for t in tops]
+            old_ids = [t["id"] for t in self.current_todos_data if not t.get("parent_id")]
+            if new_ids != old_ids:
+                self.reorder_todos_backend(new_ids)
 
-            new_order = [t for t in self.current_todos_data
-                         if t["id"] != self.dragged_item_data["id"]]
-            insert_index = len(new_order)
-
-            if target_todo and target_todo["id"] != self.dragged_item_data["id"]:
-                for i, t in enumerate(new_order):
-                    if t["id"] == target_todo["id"]:
-                        insert_index = i
-                        # Below the target's midpoint means insert after it
-                        mouse_y = event.y_root - target_row.winfo_rooty()
-                        if mouse_y >= target_row.winfo_height() / 2:
-                            insert_index = i + 1
-                        break
-
-            new_order.insert(insert_index, self.dragged_item_data)
-            if [t["id"] for t in new_order] != [t["id"] for t in self.current_todos_data]:
-                self.reorder_todos_backend([t["id"] for t in new_order])
-
+        self.drop_indicator.pack_forget()
         self.dragged_item_data = None
         self.dragged_item_frame = None
         self._drag_start_x = None
@@ -505,6 +608,51 @@ class TodoApp:
     def sync_data(self):
         self.load_todos()
         self.schedule_sync()
+
+    # --- Heatmap ---
+    def show_heatmap(self):
+        weeks = 17
+        try:
+            response = requests.get(f"{API_BASE_URL}/stats/completions",
+                                    params={"days": weeks * 7}, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            counts = response.json()
+        except requests.exceptions.RequestException:
+            messagebox.showerror("Error", "Cannot load heatmap data.")
+            return
+
+        cell, gap, pad = 16, 4, 18
+        today = datetime.date.today()
+        # Calendar grid: rows Mon-Sun, one column per week, current week last
+        start = today - datetime.timedelta(days=today.weekday() + (weeks - 1) * 7)
+        width = pad * 2 + weeks * (cell + gap) - gap
+        height = pad * 2 + 7 * (cell + gap) - gap + 30
+
+        win = ctk.CTkToplevel(self.master)
+        win.title("Heatmap")
+        win.attributes("-topmost", True)
+        win.geometry(f"{width}x{height}")
+        win.configure(fg_color="#FFFFFF")
+        canvas = tk.Canvas(win, bg="#FFFFFF", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+
+        # Silver scale, light to dark with completion count
+        shades = ["#EFF1F4", "#C9CDD6", "#A6ACB9", "#858D9D", "#636C7E"]
+        total = 0
+        day = start
+        while day <= today:
+            col = (day - start).days // 7
+            r = day.weekday()
+            n = counts.get(day.isoformat(), 0)
+            total += n
+            x = pad + col * (cell + gap)
+            y = pad + r * (cell + gap)
+            canvas.create_rectangle(x, y, x + cell, y + cell,
+                                    fill=shades[min(n, len(shades) - 1)], outline="")
+            day += datetime.timedelta(days=1)
+
+        canvas.create_text(pad, height - 20, anchor="w", fill="#858D9D",
+                           text=f"{total} done in the last {weeks} weeks")
 
     # --- App Menu ---
     def show_app_menu(self, event):
