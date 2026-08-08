@@ -20,7 +20,9 @@ It was specifically designed to support users with ADHD and other attention frag
 - 🎨 Rounded white UI, soft accent colors, minimal aesthetic
 - ✅ Active task mode — completed items get a strikethrough
 - 🔁 Local sync via Flask + SQLite (backend starts automatically)
-- 🧲 Drag-and-drop sorting, intuitive UX
+- 🧲 Drag-and-drop sorting with an insertion-line indicator
+- 🌿 One level of subtasks — tap ＋ on a task
+- 📊 Completion heatmap (right-click → Heatmap); created/completed dates are recorded automatically
 
 ## 🏗️ Architecture
 
@@ -51,8 +53,9 @@ That's it. The database (`todos.db`) is created automatically on first run.
 
 - **Click** the floating bar to expand / collapse the todo list
 - **Drag** the bar to move it anywhere on screen
-- **Drag** a todo onto the bar to make it the active task
-- **Right-click** anywhere on the app for the menu (refresh / quit)
+- **Drag** a todo to reorder — a thin line shows where it will land
+- **＋ on a task** adds a subtask below it (Enter to save, Esc to cancel)
+- **Right-click** anywhere for the menu (refresh / heatmap / quit)
 
 ## ⚙️ Configuration (optional)
 
