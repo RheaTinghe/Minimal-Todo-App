@@ -1,0 +1,89 @@
+{
+  "_comment": "Journal list for the year-end abstract digest. 'key' is used on the command line (--journals mgmtsci,jasa). ISSNs are used to query Crossref; list every ISSN a journal has (print + electronic) - the tool de-duplicates by DOI.",
+  "journals": [
+    {
+      "key": "mgmtsci",
+      "name": "Management Science",
+      "publisher": "INFORMS",
+      "issn": ["0025-1909", "1526-5501"],
+      "default": true
+    },
+    {
+      "key": "jasa",
+      "name": "Journal of the American Statistical Association",
+      "publisher": "Taylor & Francis / ASA",
+      "issn": ["0162-1459", "1537-274X"],
+      "default": true
+    },
+    {
+      "key": "aoas",
+      "name": "The Annals of Applied Statistics",
+      "publisher": "Institute of Mathematical Statistics",
+      "issn": ["1932-6157"],
+      "default": true
+    },
+    {
+      "key": "aos",
+      "name": "The Annals of Statistics",
+      "publisher": "Institute of Mathematical Statistics",
+      "issn": ["0090-5364", "2168-8966"],
+      "default": false
+    },
+    {
+      "key": "jrssb",
+      "name": "Journal of the Royal Statistical Society Series B",
+      "publisher": "Oxford University Press / RSS",
+      "issn": ["1369-7412", "1467-9868"],
+      "default": false
+    },
+    {
+      "key": "biometrika",
+      "name": "Biometrika",
+      "publisher": "Oxford University Press",
+      "issn": ["0006-3444", "1464-3510"],
+      "default": false
+    },
+    {
+      "key": "biometrics",
+      "name": "Biometrics",
+      "publisher": "Oxford University Press / IBS",
+      "issn": ["0006-341X", "1541-0420"],
+      "default": false
+    },
+    {
+      "key": "jbes",
+      "name": "Journal of Business & Economic Statistics",
+      "publisher": "Taylor & Francis / ASA",
+      "issn": ["0735-0015", "1537-2707"],
+      "default": false
+    },
+    {
+      "key": "opsresearch",
+      "name": "Operations Research",
+      "publisher": "INFORMS",
+      "issn": ["0030-364X", "1526-5463"],
+      "default": false
+    },
+    {
+      "key": "marketingsci",
+      "name": "Marketing Science",
+      "publisher": "INFORMS",
+      "issn": ["0732-2399", "1526-548X"],
+      "default": false
+    },
+    {
+      "key": "jcgs",
+      "name": "Journal of Computational and Graphical Statistics",
+      "publisher": "Taylor & Francis / ASA",
+      "issn": ["1061-8600", "1537-2715"],
+      "default": false
+    },
+    {
+      "key": "statsci",
+      "name": "Statistical Science",
+      "publisher": "Institute of Mathematical Statistics",
+      "issn": ["0883-4237", "2168-8745"],
+      "default": false
+    }
+  ]
+}
