@@ -348,6 +348,61 @@ def highlight(escaped_text: str, pattern) -> str:
     return pattern.sub(r"<mark>\1</mark>", escaped_text)
 
 
+VERDICT_LABEL = {5: "必读", 4: "值得读", 3: "扫一眼", 2: "了解即可", 1: "可跳过"}
+
+
+def render_annotation(rec: dict, esc) -> list:
+    """The four-part Chinese commentary block, when the record carries one."""
+    ann = rec.get("annotation")
+    if not ann:
+        return []
+    out = ['<div class="annot">']
+
+    def row(label: str, body_html: str) -> None:
+        out.append(
+            f'<div class="annot-row"><span class="annot-label">{label}</span>'
+            f'<div class="annot-body zh">{body_html}</div></div>'
+        )
+
+    if ann.get("abstract_zh"):
+        row("摘要翻译", esc(ann["abstract_zh"]))
+    if ann.get("one_liner_zh"):
+        row("一句话", esc(ann["one_liner_zh"]))
+
+    link_parts = []
+    if ann.get("actuarial_link"):
+        link_parts.append(esc(ann["actuarial_link"]))
+    sparks = [s for s in (ann.get("idea_sparks") or []) if s]
+    if sparks:
+        link_parts.append(
+            "<ul>" + "".join(f"<li>{esc(s)}</li>" for s in sparks) + "</ul>"
+        )
+    if link_parts:
+        row("精算关联", "".join(link_parts))
+
+    if ann.get("why_good"):
+        row("好在哪", esc(ann["why_good"]))
+    if ann.get("caveats"):
+        row("保留", esc(ann["caveats"]))
+
+    tags = [t for t in (ann.get("method_tags") or []) if t]
+    if tags:
+        out.append(
+            '<div class="tags">'
+            + "".join(f'<span class="tag">{esc(t)}</span>' for t in tags)
+            + "</div>"
+        )
+    out.append("</div>")
+    return out
+
+
+API_ABSTRACT_SOURCES = {"crossref", "openalex", "semantic-scholar"}
+ABSTRACT_SOURCE_NOTE = {
+    "web-search-summary": "内容说明：据公开检索整理，非出版商摘要原文，请以 DOI 页面为准",
+    "manual": "内容说明：人工整理，非出版商摘要原文",
+}
+
+
 def plural(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
@@ -439,6 +494,42 @@ h3.title a:hover { color: var(--accent); }
 p.abstract { margin: 9px 0 0; font-size: 14.6px; text-align: justify; hyphens: auto; }
 p.abstract.none { color: var(--muted); font-style: italic; }
 mark { background: #fff2a8; padding: 0 1px; }
+.zh {
+  font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "Microsoft YaHei", "PingFang SC", serif;
+  line-height: 1.75;
+}
+h4.title-zh { font-size: 15.5px; margin: 3px 0 0; font-weight: 600; color: #2b3038; }
+.annot { margin: 12px 0 2px; border-left: 2px solid #d8dce3; padding-left: 14px; }
+.annot-row { display: flex; gap: 12px; margin: 9px 0; align-items: baseline; }
+.annot-label {
+  flex: 0 0 82px; font-size: 11.5px; color: var(--muted); text-align: right;
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.02em; padding-top: 2px;
+}
+.annot-body { flex: 1 1 auto; font-size: 14.2px; }
+.annot-body ul { margin: 6px 0 0; padding-left: 20px; }
+.annot-body li { margin: 4px 0; }
+.verdict {
+  display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 3px;
+  font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif; vertical-align: 2px;
+  margin-left: 7px; border: 1px solid transparent; white-space: nowrap;
+}
+.verdict.v5, .verdict.v4 { background: #fbeaea; color: #9b1c1c; border-color: #f0cfcf; }
+.verdict.v3 { background: #fdf4e3; color: #8a5a00; border-color: #efe0bf; }
+.verdict.v2, .verdict.v1 { background: #f1f3f7; color: var(--muted); border-color: #e2e5ea; }
+.prov {
+  font-size: 11.5px; color: #8a5a00; background: #fdf7e8; border: 1px solid #efe3c6;
+  border-radius: 4px; padding: 3px 8px; margin: 9px 0 0; display: inline-block;
+}
+.lead {
+  background: #f7f8fa; border: 1px solid var(--line); border-radius: 6px;
+  padding: 14px 18px; margin: 18px 0 26px; font-size: 14px; line-height: 1.75;
+}
+.lead p { margin: 0 0 9px; }
+.lead p:last-child { margin-bottom: 0; }
+.lead strong { color: var(--ink); font-weight: 700; }
+.tags { margin-top: 7px; font-size: 11.5px; color: var(--muted); font-family: system-ui, sans-serif; }
+.tag { display: inline-block; background: #f1f3f7; border-radius: 3px; padding: 1px 6px; margin-right: 5px; }
 .badge {
   display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px;
   background: #f1f3f7; color: var(--muted); font-family: system-ui, sans-serif;
@@ -452,6 +543,9 @@ footer.colophon { margin-top: 50px; padding-top: 14px; border-top: 1px solid var
   section.journal:first-of-type h2.journal-name { break-before: auto; page-break-before: auto; }
   a { color: inherit; text-decoration: none; }
   p.abstract { font-size: 9.6pt; }
+  .annot-body { font-size: 9.6pt; }
+  .annot-label { font-size: 8pt; flex-basis: 62px; }
+  .annot { border-left: 1px solid #999; }
   article.entry.hit { border-left: 2px solid #000; }
 }
 @page { margin: 16mm 14mm; }
@@ -494,14 +588,20 @@ JS = """
 """
 
 
-def render_html(records: list, year: int, keywords: list, proxy_prefix: str, proxy_label: str) -> str:
+def render_html(records: list, year: int, keywords: list, proxy_prefix: str,
+                proxy_label: str, sort_by: str = "date", note_html: str = "",
+                title: str = "") -> str:
     pattern = keyword_pattern(keywords)
     by_journal = {}
     for rec in records:
         by_journal.setdefault(rec["journal"], []).append(rec)
 
     for items in by_journal.values():
-        items.sort(key=lambda r: (r["date"], r["volume"], r["pages"], r["title"]))
+        if sort_by == "relevance":
+            items.sort(key=lambda r: (-((r.get("annotation") or {}).get("relevance") or 0),
+                                      r["date"], r["title"]))
+        else:
+            items.sort(key=lambda r: (r["date"], r["volume"], r["pages"], r["title"]))
 
     total = len(records)
     hits = sum(1 for r in records if r.get("hit"))
@@ -513,15 +613,23 @@ def render_html(records: list, year: int, keywords: list, proxy_prefix: str, pro
     out.append("<!doctype html>")
     out.append('<html lang="en"><head><meta charset="utf-8">')
     out.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
-    out.append(f"<title>{year} Journal Abstracts Digest</title>")
+    page_title = title or f"{year} Journal Abstracts Digest"
+    out.append(f"<title>{esc(page_title)}</title>")
     out.append(f"<style>{CSS}</style></head><body>")
 
     out.append('<header class="masthead">')
-    out.append(f"<h1>{year} 年度期刊摘要汇编</h1>")
+    out.append(f'<h1>{esc(title) if title else f"{year} 年度期刊摘要汇编"}</h1>')
     out.append(
         f'<div class="sub">{plural(total, "article")} &middot; {plural(len(by_journal), "journal")} &middot; '
         f"{with_abs} with abstracts &middot; generated {generated}</div>"
     )
+    n_ann = sum(1 for r in records if r.get("annotation"))
+    if n_ann:
+        must = sum(1 for r in records
+                   if ((r.get("annotation") or {}).get("relevance") or 0) >= 4)
+        out.append(
+            f'<div class="sub">{n_ann} 篇带中文标注 &middot; 其中 <strong>{must}</strong> 篇标为值得读或必读</div>'
+        )
     if keywords:
         out.append(
             f'<div class="sub">Keywords highlighted: <strong>{esc(", ".join(keywords))}</strong> '
@@ -529,6 +637,8 @@ def render_html(records: list, year: int, keywords: list, proxy_prefix: str, pro
         )
     out.append("</header>")
 
+    if note_html:
+        out.append(f'<div class="lead zh">{note_html}</div>')
     out.append('<div class="toolbar no-print">')
     out.append('<input type="search" id="q" placeholder="Filter by title / author / abstract...">')
     out.append('<label><input type="checkbox" id="onlyhits"> only keyword matches</label>')
@@ -556,18 +666,29 @@ def render_html(records: list, year: int, keywords: list, proxy_prefix: str, pro
         out.append(f'<div class="journal-meta">{vol_text}{plural(len(items), "article")} in {year}</div>')
 
         for rec in items:
+            a = rec.get("annotation") or {}
             searchable = " ".join(
-                [rec["title"], rec["authors"], rec["abstract"]]
+                [rec["title"], rec["authors"], rec["abstract"],
+                 a.get("title_zh", ""), a.get("abstract_zh", ""),
+                 a.get("actuarial_link", ""), a.get("why_good", ""),
+                 " ".join(a.get("idea_sparks") or []), " ".join(a.get("method_tags") or [])]
             ).lower().replace('"', " ")
             classes = "entry hit" if rec.get("hit") else "entry"
             out.append(f'<article class="{classes}" data-text="{esc(searchable, quote=True)}">')
             out.append('<div class="entry-head"><div class="tick"></div><div>')
             link = rec["url"] or (f"https://doi.org/{rec['doi']}" if rec["doi"] else "")
             title_html = highlight(esc(rec["title"]), pattern)
+            ann = rec.get("annotation") or {}
+            badge = ""
+            score = ann.get("relevance")
+            if isinstance(score, int) and score in VERDICT_LABEL:
+                badge = f'<span class="verdict v{score}">{VERDICT_LABEL[score]}</span>'
             if link:
-                out.append(f'<h3 class="title"><a href="{esc(link, quote=True)}">{title_html}</a></h3>')
+                out.append(f'<h3 class="title"><a href="{esc(link, quote=True)}">{title_html}</a>{badge}</h3>')
             else:
-                out.append(f'<h3 class="title">{title_html}</h3>')
+                out.append(f'<h3 class="title">{title_html}{badge}</h3>')
+            if ann.get("title_zh"):
+                out.append(f'<h4 class="title-zh zh">{esc(ann["title_zh"])}</h4>')
             if rec["authors"]:
                 out.append(f'<div class="authors">{esc(rec["authors"])}</div>')
 
@@ -587,9 +708,14 @@ def render_html(records: list, year: int, keywords: list, proxy_prefix: str, pro
             out.append("</div></div>")
 
             if rec["abstract"]:
+                src = rec.get("abstract_source", "")
+                if src and src not in API_ABSTRACT_SOURCES:
+                    note = ABSTRACT_SOURCE_NOTE.get(src, f"摘要来源：{src}")
+                    out.append(f'<div class="prov zh">{esc(note)}</div>')
                 out.append(f'<p class="abstract">{highlight(esc(rec["abstract"]), pattern)}</p>')
             else:
                 out.append('<p class="abstract none">No abstract in the open metadata &mdash; open the article link to read it.</p>')
+            out.extend(render_annotation(rec, esc))
             out.append("</article>")
         out.append("</section>")
 
@@ -737,6 +863,14 @@ def main(argv=None) -> int:
                         help="keep corrections, editorials, book reviews, etc.")
     parser.add_argument("--strict-year", action="store_true",
                         help="keep only articles whose issue year equals --year (drops online-first spillover)")
+    parser.add_argument("--title", default="", help="page heading (default: '<year> 年度期刊摘要汇编')")
+    parser.add_argument("--note-file", default="",
+                        help="HTML fragment shown as an intro box under the heading")
+    parser.add_argument("--annotations", default="",
+                        help="JSON file of per-DOI Chinese annotations from annotate.py; "
+                             "merged into the rendered page")
+    parser.add_argument("--sort", choices=["date", "relevance"], default="date",
+                        help="order within each journal (relevance needs --annotations)")
     parser.add_argument("--delay", type=float, default=0.25, help="seconds between API requests")
     args = parser.parse_args(argv)
 
@@ -758,17 +892,37 @@ def main(argv=None) -> int:
         for rec in records:
             rec["hit"] = bool(pattern.search(f"{rec['title']} {rec['abstract']}"))
 
+    n_annotated = 0
+    if args.annotations:
+        ann_path = Path(args.annotations)
+        if not ann_path.exists():
+            warn(f"\nAnnotation file not found: {ann_path}")
+        else:
+            by_doi = json.loads(ann_path.read_text(encoding="utf-8"))
+            for rec in records:
+                ann = by_doi.get(rec["doi"])
+                if ann:
+                    rec["annotation"] = ann
+                    n_annotated += 1
+            info(f"\nMerged {n_annotated} annotation(s) from {ann_path}")
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{args.year}_abstracts"
     html_path = out_dir / f"{stem}.html"
     csv_path = out_dir / f"{stem}.csv"
+    json_path = out_dir / f"{stem}.json"
 
     html_path.write_text(
-        render_html(records, args.year, keywords, args.proxy_prefix, args.proxy_label),
+        render_html(records, args.year, keywords, args.proxy_prefix, args.proxy_label,
+                    sort_by=args.sort,
+                    note_html=Path(args.note_file).read_text(encoding="utf-8")
+                    if args.note_file else "",
+                    title=args.title),
         encoding="utf-8",
     )
     write_csv(records, csv_path)
+    json_path.write_text(json.dumps(records, ensure_ascii=False, indent=1), encoding="utf-8")
 
     with_abs = sum(1 for r in records if r["abstract"])
     info("\n" + "=" * 58)
@@ -776,10 +930,16 @@ def main(argv=None) -> int:
     info(f"  with abstract     : {with_abs} ({with_abs * 100 // max(len(records), 1)}%)")
     if pattern:
         info(f"  keyword matches   : {sum(1 for r in records if r.get('hit'))}")
+    if n_annotated:
+        info(f"  annotated (中文)  : {n_annotated}")
     info(f"  HTML (print this) : {html_path}")
     info(f"  CSV  (sort/filter): {csv_path}")
+    info(f"  JSON (annotate)   : {json_path}")
     info("=" * 58)
     info("\nOpen the HTML in a browser, then Ctrl/Cmd+P -> Save as PDF.")
+    if not n_annotated:
+        info("For Chinese translation + actuarial commentary, next run:")
+        info(f"  python3 annotate.py --input {json_path}")
     return 0
 
 
